@@ -7,6 +7,8 @@ import tempfile
 import shutil
 import xml.etree.ElementTree as ET
 from zipfile import ZipFile, is_zipfile
+from .utils import get_hashed_slug
+from urllib.parse import urlparse, urlunparse
 
 
 def fetch_zipfile(session, url, dst_dir):
@@ -68,40 +70,54 @@ class MecaContentProvider(ContentProvider):
             }
         )
 
-    def detect(self, url, ref=None, extra_args=None):
-        """Assume url is used and trusted as a reachable MECA bundle from an allowed origin
+    def detect(self, spec, ref=None, extra_args=None):
+        """`spec` contains a faux protocol of meca+http[s] for detection purposes
+        and we assume `spec` trusted as a reachable MECA bundle from an allowed origin
+        (binderhub RepoProvider class already checking for this).
 
-        This is due to the binderhub RepoProvider class already checking for this. If not then
-        we'd need to repeat specific checks like allowed_origin and reachable url in here.
+        An other HEAD check in made here in order to get the content-length header
         """
-        _, self.record_id = re.split("http[s]://", url)
-        return {"url": url, "record": self.record_id}
+        parsed = urlparse(spec)
+        if not parsed.scheme.endswith("+meca"):
+            return None
+        parsed = parsed._replace(scheme=parsed.scheme[:-5])
+        url = urlunparse(parsed)
 
-    def fetch(self, spec, output_dir):
-        record_id = spec["record"]
+        r = self.session.head(url)
+        changes_with_content = r.headers.get("ETag") or r.headers.get("Content-Length")
+
+        self.hashed_slug = get_hashed_slug(url, changes_with_content)
+
+        return {"url": url, "slug": self.hashed_slug}
+
+    def fetch(self, spec, output_dir, yield_output=False):
+        hashed_slug = spec["slug"]
         url = spec["url"]
 
         yield f"Creating temporary directory.\n"
         with tempfile.TemporaryDirectory() as tmpdir:
             yield f"Temporary directory created at {tmpdir}.\n"
 
-            yield f"Fetching MECA Bundle {record_id}.\n"
+            yield f"Fetching MECA Bundle {url}.\n"
             zip_filename = fetch_zipfile(self.session, url, tmpdir)
 
-            yield f"Extracting MECA Bundle {record_id}.\n"
+            yield f"Extracting MECA Bundle {zip_filename}.\n"
             is_meca, bundle_dir = extract_validate_and_identify_bundle(
                 zip_filename, tmpdir
             )
 
-            yield f"Copying MECA Bundle {record_id} to {output_dir}.\n"
+            if not is_meca:
+                yield f"This doesn't look like a meca bundle, extracting everything.\n"
+
+            yield f"Copying MECA Bundle at {bundle_dir} to {output_dir}.\n"
             files = os.listdir(bundle_dir)
             for f in files:
                 shutil.move(os.path.join(bundle_dir, f), output_dir)
 
             yield f"Removing temporary directory.\n"
 
-        yield f"MECA Bundle {record_id} fetched and unpacked.\n"
+        yield f"MECA Bundle {hashed_slug} fetched and unpacked.\n"
 
     @property
     def content_id(self):
-        return self.record_id
+        return self.hashed_slug

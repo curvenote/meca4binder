@@ -1,8 +1,11 @@
 import re
-from urllib.parse import urlparse
+import validators as val
+from urllib.parse import urlparse, unquote, urlencode
 from .baseprovider import RepoProvider
 from tornado.httpclient import AsyncHTTPClient, HTTPRequest
 from traitlets import List, Unicode, Bool, default
+from .utils import get_hashed_slug
+from urllib.parse import urlparse, urlunparse
 
 
 class MecaRepoProvider(RepoProvider):
@@ -14,10 +17,10 @@ class MecaRepoProvider(RepoProvider):
 
     name = Unicode("MECA Bundle")
 
-    display_name = Unicode("MECA Bundle (URL)")
+    display_name = "MECA Bundle"
 
     labels = {
-        "text": "MECA Bundle URL (https://journals.curvenote.com/agu/submissions/12345/meca.zip)",
+        "text": "MECA Bundle URL (https://journals.curvenote.com/journal/submissions/12345/meca.zip)",
         "tag_text": "<no tag required>",
         "ref_prop_disabled": True,
         "label_prop_disabled": True,
@@ -43,48 +46,61 @@ class MecaRepoProvider(RepoProvider):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        url_pattern = re.compile(
-            r"^(?:http|https)://"  # Start with http or https
-            r"(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|"  # domain
-            r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"  # ip
-            r"(?::\d+)?"  # optional port
-            r"(?:/?|[/?]\S+)$",
-            re.IGNORECASE,
-        )
 
-        if url_pattern.match(self.spec) is None:
-            raise ValueError("Invalid URL")
+        url = unquote(self.spec)
+
+        if not val.url(url):
+            raise ValueError(f"[MecaRepoProvider] Invalid URL {url}")
 
         if (
             len(self.allowed_origins) > 0
-            and urlparse(self.spec).netloc not in self.allowed_origins
+            and urlparse(self.spec).hostname not in self.allowed_origins
         ):
             raise ValueError("URL is not on an allowed origin")
 
-        self.url = self.spec
+        self.url = url
+
+        self.log.info(f"MECA Bundle URL: {self.url}")
+        self.log.info(f"MECA Bundle raw spec: {self.spec}")
 
     async def get_resolved_ref(self):
         # Check the URL is reachable
         client = AsyncHTTPClient()
         req = HTTPRequest(self.url, method="HEAD", user_agent="BinderHub")
+        self.log.info(f"get_resolved_ref() HEAD: {self.url}")
         try:
             r = await client.fetch(req)
+            self.log.info(f"URL is reachable: {self.url}")
+            self.hashed_slug = get_hashed_slug(
+                self.url, r.headers.get("ETag") or r.headers.get("Content-Length")
+            )
         except Exception as e:
             raise ValueError(f"URL is unreachable ({e})")
 
-        _, self.record_id = re.split("http[s]://", self.url)
-        return self.record_id
+        self.log.info(f"hashed_slug: {self.hashed_slug}")
+        return self.hashed_slug
 
     async def get_resolved_spec(self):
-        if not hasattr(self, "record_id"):
-            self.record_id = await self.get_resolved_ref()
-        return self.record_id
-
-    def get_repo_url(self):
-        return self.url
+        if not hasattr(self, "hashed_slug"):
+            await self.get_resolved_ref()
+        self.log.info(f"get_resolved_spec(): {self.hashed_slug}")
+        return self.spec
 
     async def get_resolved_ref_url(self):
+        self.log.info(f"get_resolved_ref_url(): {self.url}")
         return self.url
 
+    def get_repo_url(self):
+        """This is passed to repo2docker and is the URL that is to be fetched
+        with a `http[s]+meca` protocol string. We do this by convention to enable
+        detection of meca urls by the MecaContentProvider.
+        """
+        parsed = urlparse(self.url)
+        parsed = parsed._replace(scheme=f"{parsed.scheme}+meca")
+        url = urlunparse(parsed)
+        self.log.info(f"get_repo_url(): {url}")
+        return url
+
     def get_build_slug(self):
-        return f"meca--{self.record_id}"
+        """Should return a unique build slug"""
+        return self.hashed_slug
