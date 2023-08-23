@@ -1,2 +1,2 @@
-from .repoprovider import MecaRepoProvider
-from .contentprovider import MecaContentProvider
+from .repoprovider import *
+from .contentprovider import *

@@ -7,15 +7,26 @@ with open(os.path.join(os.path.dirname(__file__), "requirements.txt")) as f:
     ]
 
 setup(
-    name='meca4binder',
-    version='0.0.1',
-    description='MECA bundle providers for BinderHub and repo2docker',
-    url='https://github.com/curvenote/meca4binder',
+    name="meca4binder",
+    version="0.0.1",
+    description="MECA bundle providers for BinderHub and repo2docker",
+    url="https://github.com/curvenote/meca4binder",
     author="Steve Purves",
     author_email="steve@curvenote.com",
-    license='MIT',
+    license="MIT",
     packages=find_packages(),
     include_package_data=True,
     install_requires=requirements,
-    python_requires=">=3.7"
+    python_requires=">=3.7",
+    extras_require={
+        "test": [
+            "pytest",
+            "pytest-watch",
+            "pytest-asyncio",
+            "pytest-mock",
+            "black",
+            "flake8",
+            "pytest-cov",
+        ]
+    },
 )

@@ -1,2 +1,3 @@
 traitlets
+requests
 tornado>=5.1

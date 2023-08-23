@@ -1,2 +1,6 @@
 .DS_Store
-/__pycache__/
+__pycache__/
+env/
+meca4binder.egg-info/
+output/
+.pytest_cache/
