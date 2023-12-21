@@ -45,6 +45,6 @@ Currently this needs manual modifications to `repo2docker/repo2docker/app.py` in
 
 ## Contributors
 
-This package was developed as part of the [AGU (American Geophysical Union) NotebooksNow! initiative](https://data.agu.org/notebooks-now/). The aim of the project is to elevate Computational Notebooks as part of the scientific record and the [MECA (Manuscript Exchange Common Approach) bundle format], along with JATS xml has been used to ensure notebooks can be represented as scholarly objects independent of the toolchain that produced them. Read more about the JATS+MECA specification work that was undertaken [here](https://agu-nnn.curve.space/improvements).
+This package was developed as part of the [AGU (American Geophysical Union) NotebooksNow! initiative](https://data.agu.org/notebooks-now/). The aim of the project is to elevate Computational Notebooks as part of the scientific record and the [MECA (Manuscript Exchange Common Approach) bundle format](https://meca.zip), along with JATS xml has been used to ensure notebooks can be represented as scholarly objects independent of the toolchain that produced them. Read more about the JATS+MECA specification work that was undertaken [here](https://agu-nnn.curve.space/improvements).
 
 This package was developed by [Curvenote](https://curvenote.com) as part of the NotebookNow! pilot project in 2023,. This work was supported by a grant from the Alfred P. Sloan Foundation, and in kind support from Curvenote and AGU.
