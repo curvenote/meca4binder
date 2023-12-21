@@ -1,4 +1,3 @@
-import pytest
 import os
 from meca4binder import MecaContentProvider, extract_validate_and_identify_bundle
 
@@ -10,14 +9,27 @@ def test_init():
 
 def test_detect():
     provider = MecaContentProvider()
-    spec = "https://journals.curvenote.com/agu/submissions/12345/meca.zip"
+    spec = "https+meca://journals.curvenote.com/agu/submissions/12345/meca.zip"
     result = provider.detect(spec)
-    assert result["url"] == spec
-    assert result["record"] == "journals.curvenote.com/agu/submissions/12345/meca.zip"
-    assert provider.record_id == "journals.curvenote.com/agu/submissions/12345/meca.zip"
+    print(result)
     assert (
-        provider.content_id == "journals.curvenote.com/agu/submissions/12345/meca.zip"
+        result["url"] == "https://journals.curvenote.com/agu/submissions/12345/meca.zip"
     )
+    assert result["slug"] == "meca-ff804073622a71e513dd5bae6cfe3f41"
+    assert provider.content_id == "meca-ff804073622a71e513dd5bae6cfe3f41"
+
+
+def test_detect_with_query():
+    provider = MecaContentProvider()
+    spec = "https+meca://journals.curvenote.com/agu/submissions/12345/meca.zip?foo=bar&signature=ChAnGeAeAcHtImE123"
+    result = provider.detect(spec)
+    print(result)
+    assert (
+        result["url"]
+        == "https://journals.curvenote.com/agu/submissions/12345/meca.zip?foo=bar&signature=ChAnGeAeAcHtImE123"
+    )
+    assert result["slug"] == "meca-ff804073622a71e513dd5bae6cfe3f41"
+    assert provider.content_id == "meca-ff804073622a71e513dd5bae6cfe3f41"
 
 
 def test_extract_and_validate_bundle():

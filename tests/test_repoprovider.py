@@ -10,7 +10,7 @@ def test_init_with_spec():
     assert provider.spec == spec
     assert provider.url == spec
     assert provider.name == "MECA Bundle"
-    assert provider.display_name == "MECA Bundle (URL)"
+    assert provider.display_name == "MECA Bundle"
     assert provider.allowed_origins == []
 
 
