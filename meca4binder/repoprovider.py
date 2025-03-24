@@ -1,6 +1,6 @@
 import re
 import validators as val
-from urllib.parse import urlparse, unquote, urlencode
+from urllib.parse import urlparse, unquote, urlencode, quote
 from .baseprovider import RepoProvider
 from tornado.httpclient import AsyncHTTPClient, HTTPRequest
 from traitlets import List, Unicode, Bool, default
@@ -18,6 +18,18 @@ class MecaRepoProvider(RepoProvider):
     name = Unicode("MECA Bundle")
 
     display_name = "MECA Bundle"
+
+    display_config = {
+        "displayName": "MECA Bundle Url",
+        "id": "meca",
+        "spec": {"validateRegex": r"^(https?)://[^\s/$.?#].[^\s]*$"},
+        "repo": {
+            "label": "MECA Bundle Url",
+            "placeholder": "example: https://pub.curvenote.com/<id>/meca.zip",
+            "urlEncode": False,
+        },
+        "ref": {"enabled": False},
+    }
 
     labels = {
         "text": "MECA Bundle URL (https://journals.curvenote.com/journal/submissions/12345/meca.zip)",
@@ -99,6 +111,8 @@ class MecaRepoProvider(RepoProvider):
         parsed = parsed._replace(scheme=f"{parsed.scheme}+meca")
         url = urlunparse(parsed)
         self.log.info(f"get_repo_url(): {url}")
+        url = quote(url)
+        self.log.info(f"get_repo_url(): encoded {url}")
         return url
 
     def get_build_slug(self):

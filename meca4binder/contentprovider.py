@@ -8,7 +8,7 @@ import shutil
 import xml.etree.ElementTree as ET
 from zipfile import ZipFile, is_zipfile
 from .utils import get_hashed_slug
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse, urlunparse, unquote
 
 
 def fetch_zipfile(session, url, dst_dir):
@@ -77,7 +77,8 @@ class MecaContentProvider(ContentProvider):
 
         An other HEAD check in made here in order to get the content-length header
         """
-        parsed = urlparse(spec)
+        self.log.info(f"Detecting MECA bundle at {unquote(spec)}")
+        parsed = urlparse(unquote(spec))
         if not parsed.scheme.endswith("+meca"):
             return None
         parsed = parsed._replace(scheme=parsed.scheme[:-5])
@@ -93,6 +94,7 @@ class MecaContentProvider(ContentProvider):
     def fetch(self, spec, output_dir, yield_output=False):
         hashed_slug = spec["slug"]
         url = spec["url"]
+        yield f"Fetching MECA Bundle {url}.\n"
 
         yield f"Creating temporary directory.\n"
         with tempfile.TemporaryDirectory() as tmpdir:
