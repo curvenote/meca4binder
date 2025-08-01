@@ -28,6 +28,139 @@ def get_hashed_slug(url, changes_with_content):
 1. **Location Dependency**: Moving a MECA bundle to a different URL creates a different image name
 2. **Server Configuration Sensitivity**: Changes in ETag or Content-Length headers affect caching
 3. **Fragile Caching**: Same content at different locations doesn't share cached images
+4. **Complex Repository Names**: Additional truncated SHA hash makes names unnecessarily long
+
+## Security: Origin Whitelisting
+
+### Trusted Sources Configuration
+
+The `MecaRepoProvider` includes built-in origin whitelisting to ensure MECA bundles are only fetched from trusted sources:
+
+```python
+allowed_origins = List(
+    config=True,
+    help="""List of allowed origins for the URL
+
+    If set, the URL must be on one of these origins.
+
+    If not set, the URL can be on any origin.
+    """,
+)
+
+@default("allowed_origins")
+def _allowed_origins_default(self):
+    return []
+```
+
+### Security Validation
+
+In the `__init__` method, URLs are validated against the whitelist:
+
+```python
+def __init__(self, *args, **kwargs):
+    super().__init__(*args, **kwargs)
+    
+    url = unquote(self.spec)
+    
+    if not val.url(url):
+        raise ValueError(f"[MecaRepoProvider] Invalid URL {url}")
+    
+    # Security check: validate against allowed origins
+    if (
+        len(self.allowed_origins) > 0
+        and urlparse(self.spec).hostname not in self.allowed_origins
+    ):
+        raise ValueError("URL is not on an allowed origin")
+    
+    self.url = url
+```
+
+### Recommended Trusted Origins
+
+For cloud storage providers that support Content-MD5 headers:
+
+```python
+# Google Cloud Storage
+c.MecaRepoProvider.allowed_origins = [
+    "storage.googleapis.com",
+    "pub.curvenote.com",
+    "journals.curvenote.com"
+]
+
+# AWS S3
+c.MecaRepoProvider.allowed_origins = [
+    "*.s3.amazonaws.com",
+    "*.s3.*.amazonaws.com"
+]
+
+# Azure Blob Storage
+c.MecaRepoProvider.allowed_origins = [
+    "*.blob.core.windows.net"
+]
+
+# Supabase Storage
+c.MecaRepoProvider.allowed_origins = [
+    "*.supabase.co"
+]
+
+# DigitalOcean Spaces
+c.MecaRepoProvider.allowed_origins = [
+    "*.digitaloceanspaces.com"
+]
+
+# Backblaze B2
+c.MecaRepoProvider.allowed_origins = [
+    "*.backblazeb2.com"
+]
+```
+
+### Environment Variable Configuration
+
+```bash
+# Set trusted origins via environment variable
+export MECA_ALLOWED_ORIGINS="storage.googleapis.com,pub.curvenote.com,journals.curvenote.com"
+
+# Or for multiple cloud providers
+export MECA_ALLOWED_ORIGINS="storage.googleapis.com,*.s3.amazonaws.com,*.blob.core.windows.net,*.supabase.co"
+```
+
+### BinderHub Configuration
+
+Add to `binderhub_config.py`:
+
+```python
+# Security: Trusted origins for MECA bundles
+c.MecaRepoProvider.allowed_origins = os.getenv("MECA_ALLOWED_ORIGINS", "").split(",") if os.getenv("MECA_ALLOWED_ORIGINS") else []
+
+# Example for production with cloud storage
+if os.getenv("MECA_HASH_SCHEME") == "cloud":
+    c.MecaRepoProvider.allowed_origins = [
+        "storage.googleapis.com",
+        "*.s3.amazonaws.com", 
+        "*.blob.core.windows.net",
+        "*.supabase.co",
+        "*.digitaloceanspaces.com",
+        "*.backblazeb2.com"
+    ]
+```
+
+### Security Benefits
+
+1. **Prevents SSRF**: Blocks requests to unauthorized domains
+2. **Trusted Sources**: Only allows MECA bundles from known, trusted providers
+3. **Cloud Storage Focus**: Whitelist focuses on providers with Content-MD5 support
+4. **Configurable**: Easy to add/remove trusted origins per deployment
+5. **Environment-Specific**: Different origins for dev/staging/production
+
+### Error Handling
+
+When a URL is not on the allowed origins list:
+
+```
+ValueError: URL is not on an allowed origin
+```
+
+This provides clear feedback about why a MECA bundle URL was rejected.
 
 ## Proposed Solution: Content-Based Naming
 
@@ -39,6 +172,7 @@ Make image names and tags **location-independent** by using the **actual content
 2. **Portable**: Move files between servers without breaking caching
 3. **Robust**: Server configuration changes don't affect caching
 4. **Deterministic**: Same content = same image, always
+5. **Secure**: Only trusted origins are allowed
 
 ## Cloud Storage Content-MD5 Support
 
@@ -125,7 +259,7 @@ async def get_resolved_ref(self):
     # Calculate MD5 of the actual content
     content_hash = md5(response.body).hexdigest()
     
-    self.hashed_slug = f"meca-{content_hash}"
+    self.hashed_slug = f"meca-b-{content_hash}"  # Note: meca-b prefix
     return self.hashed_slug
 ```
 
@@ -153,8 +287,8 @@ def fetch(self, spec, output_dir, yield_output=False):
 ```
 
 #### Result
-- **Repository**: `meca-{content_hash}-{truncated_hash}`
-- **Tag**: `meca-{content_hash}`
+- **Repository**: `meca-b-{content_hash}` (no truncated hash)
+- **Tag**: `meca-b-{content_hash}`
 
 ### Strategy 2: Cloud Storage MD5 Headers (RECOMMENDED)
 
@@ -185,7 +319,7 @@ async def get_resolved_ref(self):
     if not content_hash:
         content_hash = md5(f"{self.url}-{response.headers.get('ETag') or response.headers.get('Content-Length')}".encode()).hexdigest()
     
-    self.hashed_slug = f"meca-{content_hash}"
+    self.hashed_slug = f"meca-b-{content_hash}"  # Note: meca-b prefix
     return self.hashed_slug
 ```
 
@@ -202,8 +336,8 @@ async def get_resolved_ref(self):
 #### Content-Based Tags, URL-Based Repository Names
 ```python
 # Use content hash for tag, URL hash for repository name
-tag = f"meca-{content_hash}"
-repo_name = f"meca-{url_hash}-{content_hash[:6]}"
+tag = f"meca-b-{content_hash}"  # Note: meca-b prefix
+repo_name = f"meca-{url_hash}"  # No truncated hash
 ```
 
 #### Benefits
@@ -268,7 +402,7 @@ async def get_resolved_ref(self):
             # Use cloud storage MD5 headers (no download)
             self.log.info("Using cloud storage MD5 headers")
             content_hash = self._get_cloud_md5(r.headers)
-            self.hashed_slug = f"meca-{content_hash}"
+            self.hashed_slug = f"meca-b-{content_hash}"  # Note: meca-b prefix
             
         elif self.hash_scheme == "content":
             # Content-based hashing - download the file
@@ -276,7 +410,7 @@ async def get_resolved_ref(self):
             content_req = HTTPRequest(self.url, method="GET", user_agent="BinderHub")
             content_response = await client.fetch(content_req)
             content_hash = md5(content_response.body).hexdigest()
-            self.hashed_slug = f"meca-{content_hash}"
+            self.hashed_slug = f"meca-b-{content_hash}"  # Note: meca-b prefix
             
         else:
             # Default URL-based hashing
@@ -316,7 +450,20 @@ Add to `binderhub_config.py`:
 # MECA Provider Configuration
 c.MecaRepoProvider.hash_scheme = os.getenv("MECA_HASH_SCHEME", "url")
 c.MecaRepoProvider.enable_content_hashing = os.getenv("MECA_ENABLE_CONTENT_HASHING", "false").lower() == "true"
+
+# Security: Trusted origins for MECA bundles
 c.MecaRepoProvider.allowed_origins = os.getenv("MECA_ALLOWED_ORIGINS", "").split(",") if os.getenv("MECA_ALLOWED_ORIGINS") else []
+
+# Example for production with cloud storage
+if os.getenv("MECA_HASH_SCHEME") == "cloud":
+    c.MecaRepoProvider.allowed_origins = [
+        "storage.googleapis.com",
+        "*.s3.amazonaws.com", 
+        "*.blob.core.windows.net",
+        "*.supabase.co",
+        "*.digitaloceanspaces.com",
+        "*.backblazeb2.com"
+    ]
 ```
 
 ### Environment Variables
@@ -332,8 +479,8 @@ export MECA_ENABLE_CONTENT_HASHING="true"
 # For URL-based hashing (current default)
 export MECA_HASH_SCHEME="url"
 
-# Optional: Restrict to specific origins
-export MECA_ALLOWED_ORIGINS="storage.googleapis.com,s3.amazonaws.com,account.blob.core.windows.net"
+# Security: Restrict to trusted origins
+export MECA_ALLOWED_ORIGINS="storage.googleapis.com,*.s3.amazonaws.com,*.blob.core.windows.net,*.supabase.co"
 ```
 
 ### Docker Compose Example
@@ -345,7 +492,7 @@ services:
     environment:
       - MECA_HASH_SCHEME=cloud
       - MECA_ENABLE_CONTENT_HASHING=false
-      - MECA_ALLOWED_ORIGINS=storage.googleapis.com,s3.amazonaws.com
+      - MECA_ALLOWED_ORIGINS=storage.googleapis.com,*.s3.amazonaws.com,*.blob.core.windows.net,*.supabase.co
 ```
 
 ### Per-Environment Configuration
@@ -353,12 +500,22 @@ services:
 ```python
 # Development environment
 c.MecaRepoProvider.hash_scheme = "url"  # Fast, simple
+c.MecaRepoProvider.allowed_origins = ["storage.googleapis.com"]  # Limited trusted sources
 
 # Production with cloud storage
 c.MecaRepoProvider.hash_scheme = "cloud"  # Location-independent, efficient
+c.MecaRepoProvider.allowed_origins = [
+    "storage.googleapis.com",
+    "*.s3.amazonaws.com",
+    "*.blob.core.windows.net",
+    "*.supabase.co",
+    "*.digitaloceanspaces.com",
+    "*.backblazeb2.com"
+]
 
 # Research environment with content hashing
 c.MecaRepoProvider.hash_scheme = "content"  # Most robust, but slower
+c.MecaRepoProvider.allowed_origins = ["storage.googleapis.com", "*.s3.amazonaws.com"]
 ```
 
 ## Repository Name Simplification
@@ -372,50 +529,68 @@ meca-2df10e6d81881615d274bef324537fcd65-de1b43
                                     truncated hash
 ```
 
-### Solutions
+### Solution: Use Safe Slug Mechanism
 
-#### Option 1: Modify BinderHub Configuration
-```python
-def _safe_build_slug(build_slug, limit, hash_length=0):  # Set hash_length=0
-    return build_slug[:limit].lower()  # Just truncate, no hash
-```
+We will use the **Safe Slug mechanism** to ensure clean repository names without the additional truncated hash:
 
-#### Option 2: Ensure Safe Build Slugs
 ```python
 def get_build_slug(self):
+    """Should return a unique build slug that is safe for Docker naming"""
     # Ensure the slug is already safe for Docker naming
     safe_slug = self.hashed_slug.replace("_", "-").lower()
+    
     # Make sure it doesn't end with a dash
     if safe_slug.endswith("-"):
         safe_slug = safe_slug[:-1]
+    
+    # Ensure it doesn't start with a dash
+    if safe_slug.startswith("-"):
+        safe_slug = safe_slug[1:]
+    
+    # Ensure it only contains valid Docker name characters
+    import re
+    safe_slug = re.sub(r'[^a-z0-9-]', '-', safe_slug)
+    
+    # Remove consecutive dashes
+    safe_slug = re.sub(r'-+', '-', safe_slug)
+    
     return safe_slug
 ```
 
-#### Option 3: Simple Naming
-```python
-def get_build_slug(self):
-    return "meca-bundle"  # Simple, safe name
-```
+### Result: Clean Repository Names
+
+- **Current**: `meca-2df10e6d81881615d274bef324537fcd65-de1b43`
+- **Proposed**: `meca-b-2df10e6d81881615d274bef324537fcd65`
+
+### Benefits of Safe Slug Approach
+
+1. **Clean Names**: No additional truncated hashes
+2. **Predictable**: Repository names match the content hash
+3. **Docker-Safe**: Ensures valid Docker image names
+4. **Readable**: Easy to identify and debug
+5. **Consistent**: Same pattern across all content-based hashing
 
 ## Implementation Recommendations
 
 ### For Cloud Storage (RECOMMENDED)
 1. **Use Strategy 2**: Leverage cloud storage MD5 headers
-2. **Implement Option 2**: Ensure safe build slugs
-3. **Result**: Clean, location-independent naming
-4. **Wide Compatibility**: Works with GCS, AWS S3, Azure, Supabase, DigitalOcean, Backblaze
-5. **Performance**: No file downloads required
-6. **Cost-Effective**: Minimal bandwidth usage for large files
+2. **Implement Safe Slug**: Ensure clean repository names without truncated hashes
+3. **Configure Security**: Set trusted origins for cloud storage providers
+4. **Result**: Clean, location-independent naming with security
+5. **Wide Compatibility**: Works with GCS, AWS S3, Azure, Supabase, DigitalOcean, Backblaze
+6. **Performance**: No file downloads required
+7. **Cost-Effective**: Minimal bandwidth usage for large files
 
 ### For Other Storage Systems
 1. **Use Strategy 1**: Download and calculate MD5
 2. **Consider performance implications**
 3. **Implement caching for repeated requests**
+4. **Configure appropriate trusted origins**
 
 ### Migration Strategy
 1. **Phase 1**: Implement cloud storage MD5 headers approach
-2. **Phase 2**: Configure per-deployment settings
-3. **Phase 3**: Monitor caching effectiveness
+2. **Phase 2**: Configure per-deployment settings and trusted origins
+3. **Phase 3**: Monitor caching effectiveness and security
 4. **Phase 4**: Gradually migrate existing images (optional)
 
 ## Example Outcomes
@@ -428,9 +603,14 @@ URL2: https://server2.com/bundle.zip → meca-hash2-abc123:meca-hash2
 
 ### Proposed (Location-Independent)
 ```
-URL1: https://server1.com/bundle.zip → meca-content123-de1b43:meca-content123
-URL2: https://server2.com/bundle.zip → meca-content123-de1b43:meca-content123
+URL1: https://server1.com/bundle.zip → meca-b-content123:meca-b-content123
+URL2: https://server2.com/bundle.zip → meca-b-content123:meca-b-content123
 ```
+
+### Tag Distinction
+- **Current URL-based tags**: `meca-{url_hash}`
+- **New content-based tags**: `meca-b-{content_hash}`
+- **Easy identification**: `meca-b-` prefix clearly indicates content-based hashing
 
 ## Benefits Summary
 
@@ -444,5 +624,8 @@ URL2: https://server2.com/bundle.zip → meca-content123-de1b43:meca-content123
 8. **Configurable**: Per-deployment hashing scheme selection
 9. **Cost-Effective**: Minimal bandwidth usage for large files
 10. **Flexible**: Easy migration between different hashing strategies
+11. **Clear Distinction**: `meca-b-` prefix makes it easy to identify content-based tags
+12. **Secure**: Origin whitelisting prevents SSRF and ensures trusted sources
+13. **Clean Names**: Safe slug mechanism prevents additional truncated hashes
 
-This approach would make MECA bundle caching much more effective and reliable across different storage locations and server configurations, with the cloud storage MD5 headers approach being the most efficient and practical solution.
+This approach would make MECA bundle caching much more effective and reliable across different storage locations and server configurations, with the cloud storage MD5 headers approach being the most efficient and practical solution. The `meca-b-` prefix provides clear visual distinction between URL-based and content-based image tags, while origin whitelisting ensures security and trust. The safe slug mechanism ensures clean, predictable repository names without unnecessary complexity.
