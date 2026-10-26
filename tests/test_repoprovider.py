@@ -1,5 +1,8 @@
 import pytest
+from tornado.httpclient import AsyncHTTPClient, HTTPClientError
+from tornado.httputil import HTTPHeaders
 from meca4binder import MecaRepoProvider
+from meca4binder.utils import get_hashed_slug
 
 
 def test_init_with_spec():
@@ -70,27 +73,59 @@ async def test_get_resolved_ref_url():
     )
 
 
+def mock_fetch(mocker, **kwargs):
+    return mocker.patch.object(
+        AsyncHTTPClient, "fetch", new_callable=mocker.AsyncMock, **kwargs
+    )
+
+
 @pytest.mark.asyncio
-async def test_get_resolved_ref_unreachable():
+async def test_get_resolved_ref_unreachable(mocker):
+    mock_fetch(mocker, side_effect=HTTPClientError(404))
     provider = MecaRepoProvider(
         spec="https://journals.curvenote.com/agu/submissions/12345/meca.zip"
     )
 
-    with pytest.raises(ValueError, match="URL is unreachable"):
+    with pytest.raises(ValueError, match=r"URL is unreachable \(HTTP 404: Not Found\)"):
         await provider.get_resolved_ref()
 
 
 @pytest.mark.asyncio
-async def test_get_resolved_ref():
-    # Note: just need a reachable url for this to succeed, does not have to point to a file
-    provider = MecaRepoProvider(
-        spec="https://github.com/Notebooks-Now/submission-myst-full"
+async def test_get_resolved_ref(mocker):
+    url = "https://journals.curvenote.com/agu/submissions/12345/meca.zip"
+    etag = '"ff804073622a71e513dd5bae6cfe3f41"'
+    fetch = mock_fetch(
+        mocker, return_value=mocker.Mock(headers=HTTPHeaders({"ETag": etag}))
     )
+    provider = MecaRepoProvider(spec=url)
 
     ref = await provider.get_resolved_ref()
-    assert ref == "github.com/Notebooks-Now/submission-myst-full"
-    assert provider.record_id == "github.com/Notebooks-Now/submission-myst-full"
-    assert (
-        provider.get_build_slug()
-        == "meca--github.com/Notebooks-Now/submission-myst-full"
+
+    fetch.assert_awaited_once()
+    req = fetch.await_args.args[0]
+    assert req.method == "HEAD"
+    assert req.url == url
+    assert ref == get_hashed_slug(url, etag)
+    assert provider.get_build_slug() == get_hashed_slug(url, etag)
+
+
+@pytest.mark.asyncio
+async def test_get_resolved_ref_falls_back_to_content_length(mocker):
+    url = "https://journals.curvenote.com/agu/submissions/12345/meca.zip"
+    mock_fetch(
+        mocker,
+        return_value=mocker.Mock(headers=HTTPHeaders({"Content-Length": "1234"})),
     )
+    provider = MecaRepoProvider(spec=url)
+
+    assert await provider.get_resolved_ref() == get_hashed_slug(url, "1234")
+
+
+@pytest.mark.asyncio
+async def test_get_resolved_ref_ignores_query(mocker):
+    url = "https://journals.curvenote.com/agu/submissions/12345/meca.zip"
+    etag = '"ff804073622a71e513dd5bae6cfe3f41"'
+    mock_fetch(mocker, return_value=mocker.Mock(headers=HTTPHeaders({"ETag": etag})))
+    provider = MecaRepoProvider(spec=f"{url}?foo=bar&signature=ChAnGeAeAcHtImE123")
+
+    assert await provider.get_resolved_ref() == get_hashed_slug(url, etag)
