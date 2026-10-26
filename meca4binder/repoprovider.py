@@ -44,9 +44,9 @@ class MecaRepoProvider(RepoProvider):
 
     allowed_origins = List(
         config=True,
-        help="""List of allowed origins for the URL
+        help="""List of allowed origins (hostnames) for the URL
 
-        If set, the URL must be on one of these origins.
+        If set, the URL's hostname must be one of these, exactly (case is ignored).
 
         If not set, the URL can be on any origin.
         """,
@@ -59,15 +59,16 @@ class MecaRepoProvider(RepoProvider):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+        # BinderHub passes the spec as it appears in the request path, so it
+        # may be percent-encoded. Check the decoded URL, not the raw spec.
         url = unquote(self.spec)
+        parsed = urlparse(url)
 
-        if not val.url(url):
+        if parsed.scheme not in ("http", "https") or not val.url(url):
             raise ValueError(f"[MecaRepoProvider] Invalid URL {url}")
 
-        if (
-            len(self.allowed_origins) > 0
-            and urlparse(self.spec).hostname not in self.allowed_origins
-        ):
+        allowed = {origin.lower() for origin in self.allowed_origins}
+        if allowed and parsed.hostname not in allowed:
             raise ValueError("URL is not on an allowed origin")
 
         self.url = url

@@ -129,3 +129,50 @@ async def test_get_resolved_ref_ignores_query(mocker):
     provider = MecaRepoProvider(spec=f"{url}?foo=bar&signature=ChAnGeAeAcHtImE123")
 
     assert await provider.get_resolved_ref() == get_hashed_slug(url, etag)
+
+
+ALLOWED = ["journals.curvenote.com", "journal.agu.com"]
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        # BinderHub passes the spec as it appears in the request path, so a
+        # bundle URL can arrive percent-encoded.
+        "https%3A%2F%2Fjournals.curvenote.com%2Fagu%2Fsubmissions%2F12345%2Fmeca.zip",
+        "https%3A//journals.curvenote.com/agu/submissions/12345/meca.zip",
+        "https://JOURNALS.curvenote.com/agu/submissions/12345/meca.zip",
+    ],
+)
+def test_encoded_or_mixed_case_spec_from_allowed_origin(spec):
+    provider = MecaRepoProvider(spec=spec, allowed_origins=ALLOWED)
+    assert provider.url.lower() == (
+        "https://journals.curvenote.com/agu/submissions/12345/meca.zip"
+    )
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        "https%3A%2F%2Fother.google.com%2Fagu%2Fsubmissions%2F12345%2Fmeca.zip",
+        "https://evil-journals.curvenote.com/agu/submissions/12345/meca.zip",
+        "https://journals.curvenote.com.evil.com/agu/submissions/12345/meca.zip",
+        "https://journals.curvenote.com@evil.com/agu/submissions/12345/meca.zip",
+        "https%3A%2F%2Fjournals.curvenote.com%40evil.com%2Fmeca.zip",
+    ],
+)
+def test_other_origin_throws(spec):
+    with pytest.raises(ValueError, match="URL is not on an allowed origin"):
+        MecaRepoProvider(spec=spec, allowed_origins=ALLOWED)
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        "ftp://journals.curvenote.com/agu/submissions/12345/meca.zip",
+        "file%3A%2F%2F%2Fetc%2Fpasswd",
+    ],
+)
+def test_non_http_url_throws(spec):
+    with pytest.raises(ValueError, match="Invalid URL"):
+        MecaRepoProvider(spec=spec, allowed_origins=ALLOWED)
