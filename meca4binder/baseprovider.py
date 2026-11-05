@@ -7,8 +7,9 @@ SHA1_PATTERN = re.compile(r"[0-9a-f]{40}")
 
 
 """
-    Copied in from binderhub to avoid circular dependency
-    Not needed once we integrate back fully with binderhub
+    Copied in from binderhub, for where binderhub isn't installed (repo2docker,
+    tests). Where it is, RepoProvider below is binderhub's own: BinderHub only
+    accepts repo providers that subclass it.
     https://github.com/jupyterhub/binderhub/blob/main/binderhub/repoproviders.py#L54
 """
 class RepoProvider(LoggingConfigurable):
@@ -157,6 +158,12 @@ until we get a better integration point
 ContentProviders accept a `spec` of various kinds, and
 provide the contents from the spec to a given output directory.
 """
+
+try:
+    from binderhub.repoproviders import RepoProvider  # noqa: F811
+except ImportError:
+    pass
+
 
 class ContentProviderException(Exception):
     """Exception raised when a ContentProvider can not provide content."""
