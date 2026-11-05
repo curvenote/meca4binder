@@ -22,11 +22,16 @@ class MecaRepoProvider(RepoProvider):
     display_config = {
         "displayName": "MECA Bundle Url",
         "id": "meca",
-        "spec": {"validateRegex": r"^(https?)://[^\s/$.?#].[^\s]*$"},
+        # BinderHub's UI routes /v2/meca/(?<buildSpec>validateRegex) with
+        # regexparam, which splits the route on "/" and stops at an empty
+        # segment, so this can't contain "//" or anchors. It matches the
+        # URL-encoded spec links use, and a plain one.
+        "spec": {"validateRegex": r"https?(:|%3[Aa]).+"},
         "repo": {
             "label": "MECA Bundle Url",
             "placeholder": "example: https://pub.curvenote.com/<id>/meca.zip",
-            "urlEncode": False,
+            # Encoded, so a signed URL's query string stays part of the spec.
+            "urlEncode": True,
         },
         "ref": {"enabled": False},
     }
